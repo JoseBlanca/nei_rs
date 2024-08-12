@@ -1,42 +1,30 @@
-use anyhow::{anyhow, Context, Result};
 use std::io::{BufRead, BufReader, Read};
 
-#[derive(Debug)]
-enum VCFParseError {
-    InvalidSampleLine,
-    ReadLineError,
+#[derive(thiserror::Error, Debug)]
+pub enum VCFParseError {
+    #[error("The line failed to define the fields and include the samples: `{0}`")]
+    InvalidSampleLine(String),
+    #[error("Error reading VCF line number: {0}")]
+    ReadLineError(u64),
 }
 
-impl std::fmt::Display for VCFParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            VCFParseError::InvalidSampleLine => write!(f, "Invalid sample line"),
-            VCFParseError::ReadLineError => write!(f, "Error reading VCF line"),
-        }
-    }
-}
-
-fn read_sample_line(line: &str) -> Result<Vec<String>> {
+fn read_sample_line(line: &str) -> Result<Vec<String>, VCFParseError> {
     if !line.starts_with("#CHROM") {
-        return Err(anyhow!(VCFParseError::InvalidSampleLine))
-            .context(format!("The invalid line was: {line}"));
+        return Err(VCFParseError::InvalidSampleLine(line.to_string()));
     }
 
     let samples = line.split("\t").skip(9).map(|s| s.to_string()).collect();
     Ok(samples)
 }
 
-pub fn parse_vcf<T: Read>(file: BufReader<T>) -> Result<()> {
+pub fn parse_vcf<T: Read>(file: BufReader<T>) -> Result<(), VCFParseError> {
     let mut in_meta_section = true;
     let mut sample_line_read = false;
     for (line_num, line_res) in file.lines().enumerate() {
-        let mut samples: Vec<String>;
+        let samples: Vec<String>;
         let vcf_line = match line_res {
             Ok(line) => line,
-            Err(_) => {
-                return Err(anyhow!(VCFParseError::ReadLineError))
-                    .context(format!("The line number was: {}", line_num + 1));
-            }
+            Err(_) => return Err(VCFParseError::ReadLineError(line_num as u64)),
         };
         if in_meta_section && !vcf_line.starts_with("##") {
             in_meta_section = false;
