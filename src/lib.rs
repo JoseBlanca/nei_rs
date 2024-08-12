@@ -1,9 +1,54 @@
+use anyhow::{anyhow, Context, Result};
 use std::io::{BufRead, BufReader, Read};
 
-pub fn parse_vcf<T: Read>(file: BufReader<T>) {
-    for line in file.lines() {
-        println!("{}", line.unwrap());
+#[derive(Debug)]
+enum VCFParseError {
+    InvalidSampleLine,
+    ReadLineError,
+}
+
+impl std::fmt::Display for VCFParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VCFParseError::InvalidSampleLine => write!(f, "Invalid sample line"),
+            VCFParseError::ReadLineError => write!(f, "Error reading VCF line"),
+        }
     }
+}
+
+fn read_sample_line(line: &str) -> Result<Vec<String>> {
+    if !line.starts_with("#CHROM") {
+        return Err(anyhow!(VCFParseError::InvalidSampleLine))
+            .context(format!("The invalid line was: {line}"));
+    }
+
+    let samples = line.split("\t").skip(9).map(|s| s.to_string()).collect();
+    Ok(samples)
+}
+
+pub fn parse_vcf<T: Read>(file: BufReader<T>) -> Result<()> {
+    let mut in_meta_section = true;
+    let mut sample_line_read = false;
+    for (line_num, line_res) in file.lines().enumerate() {
+        let mut samples: Vec<String>;
+        let vcf_line = match line_res {
+            Ok(line) => line,
+            Err(_) => {
+                return Err(anyhow!(VCFParseError::ReadLineError))
+                    .context(format!("The line number was: {}", line_num + 1));
+            }
+        };
+        if in_meta_section && !vcf_line.starts_with("##") {
+            in_meta_section = false;
+        }
+        if !in_meta_section && !sample_line_read {
+            samples = read_sample_line(&vcf_line)?;
+            sample_line_read = true;
+            println!("{:?}", samples);
+        }
+        //println!("{}", vcf_line);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -39,6 +84,6 @@ mod tests {
     #[test]
     fn it_works() {
         let mock_file = BufReader::new(VCF_45.as_bytes());
-        parse_vcf(mock_file)
+        parse_vcf(mock_file).expect("Error")
     }
 }
