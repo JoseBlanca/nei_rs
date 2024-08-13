@@ -1,11 +1,22 @@
-use std::io::{BufRead, BufReader, Read};
+use std::{
+    env::var_os,
+    io::{BufRead, BufReader, Empty, Read},
+};
 
-pub struct Variants {
+#[derive(Debug)]
+struct Variant {}
+
+pub struct Variants<'a> {
     samples: Option<Vec<String>>,
+    vars_iter: Option<Box<dyn Iterator<Item = Result<Variant, VCFParseError>> + 'a>>,
 }
-impl Default for Variants {
-    fn default() -> Variants {
-        Variants { samples: None }
+
+impl<'a> Default for Variants<'a> {
+    fn default() -> Variants<'a> {
+        Variants {
+            samples: None,
+            vars_iter: None,
+        }
     }
 }
 
@@ -15,6 +26,8 @@ pub enum VCFParseError {
     InvalidSampleLine(String),
     #[error("Error reading VCF line number: {0}")]
     ReadLineError(u64),
+    #[error("The file is empty")]
+    EmptyFile,
 }
 
 fn read_sample_line(line: &str) -> Result<Vec<String>, VCFParseError> {
@@ -26,26 +39,41 @@ fn read_sample_line(line: &str) -> Result<Vec<String>, VCFParseError> {
     Ok(samples)
 }
 
-pub fn parse_vcf<T: Read>(file: BufReader<T>) -> Result<Variants, VCFParseError> {
+fn parse_variant_line(line: String) -> Result<Variant, VCFParseError> {
+    println!("Parsing line: {}", line);
+    Ok(Variant {})
+}
+
+pub fn parse_vcf<'a, T: Read + 'a>(mut file: BufReader<T>) -> Result<Variants<'a>, VCFParseError> {
     let mut vars = Variants::default();
 
-    let mut in_meta_section = true;
-    for (line_num, line_res) in file.lines().enumerate() {
-        let samples: Vec<String>;
-        let vcf_line = match line_res {
-            Ok(line) => line,
-            Err(_) => return Err(VCFParseError::ReadLineError(line_num as u64)),
-        };
-        if in_meta_section && !vcf_line.starts_with("##") {
-            in_meta_section = false;
+    loop {
+        let mut line = String::new();
+        match file.read_line(&mut line) {
+            Ok(0) => return Err(VCFParseError::EmptyFile),
+            Ok(_) => (),
+            Err(_) => return Err(VCFParseError::ReadLineError(0)),
         }
-        if !in_meta_section {
-            samples = read_sample_line(&vcf_line)?;
+        if line.starts_with("##") {
+        } else if line.starts_with("#CHROM") {
+            let samples = read_sample_line(&line)?;
             vars.samples = Some(samples);
             break;
+        } else {
+            return Err(VCFParseError::InvalidSampleLine(line));
         }
     }
-    Ok(vars)
+
+    let vars_iter = file.lines().map(|line_res| {
+        let line = match line_res {
+            Ok(line) => line,
+            Err(_) => return Err(VCFParseError::ReadLineError(0)),
+        };
+        parse_variant_line(line)
+    });
+    vars.vars_iter = Some(Box::new(vars_iter));
+
+    return Ok(vars);
 }
 
 #[cfg(test)]
@@ -82,5 +110,13 @@ mod tests {
     fn it_works() {
         let mock_file = BufReader::new(VCF_45.as_bytes());
         let vars = parse_vcf(mock_file).expect("Error");
+        let vars_iter = match vars.vars_iter {
+            Some(iter) => iter,
+            None => panic!("Vars iter is None"),
+        };
+        for var_res in vars_iter {
+            let var = var_res.expect("Error reading variant");
+            println!("{:?}", var);
+        }
     }
 }
