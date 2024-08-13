@@ -1,5 +1,14 @@
 use std::io::{BufRead, BufReader, Read};
 
+pub struct Variants {
+    samples: Option<Vec<String>>,
+}
+impl Default for Variants {
+    fn default() -> Variants {
+        Variants { samples: None }
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum VCFParseError {
     #[error("The line failed to define the fields and include the samples: `{0}`")]
@@ -17,9 +26,10 @@ fn read_sample_line(line: &str) -> Result<Vec<String>, VCFParseError> {
     Ok(samples)
 }
 
-pub fn parse_vcf<T: Read>(file: BufReader<T>) -> Result<(), VCFParseError> {
+pub fn parse_vcf<T: Read>(file: BufReader<T>) -> Result<Variants, VCFParseError> {
+    let mut vars = Variants::default();
+
     let mut in_meta_section = true;
-    let mut sample_line_read = false;
     for (line_num, line_res) in file.lines().enumerate() {
         let samples: Vec<String>;
         let vcf_line = match line_res {
@@ -29,14 +39,13 @@ pub fn parse_vcf<T: Read>(file: BufReader<T>) -> Result<(), VCFParseError> {
         if in_meta_section && !vcf_line.starts_with("##") {
             in_meta_section = false;
         }
-        if !in_meta_section && !sample_line_read {
+        if !in_meta_section {
             samples = read_sample_line(&vcf_line)?;
-            sample_line_read = true;
-            println!("{:?}", samples);
+            vars.samples = Some(samples);
+            break;
         }
-        //println!("{}", vcf_line);
     }
-    Ok(())
+    Ok(vars)
 }
 
 #[cfg(test)]
@@ -72,6 +81,6 @@ mod tests {
     #[test]
     fn it_works() {
         let mock_file = BufReader::new(VCF_45.as_bytes());
-        parse_vcf(mock_file).expect("Error")
+        let vars = parse_vcf(mock_file).expect("Error");
     }
 }
