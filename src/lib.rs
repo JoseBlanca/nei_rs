@@ -1,23 +1,11 @@
-use std::{
-    env::var_os,
-    io::{BufRead, BufReader, Empty, Read},
-};
+use std::io::{BufRead, BufReader, Read};
 
 #[derive(Debug)]
-struct Variant {}
+pub struct Variant {}
 
 pub struct Variants<'a> {
-    samples: Option<Vec<String>>,
-    vars_iter: Option<Box<dyn Iterator<Item = Result<Variant, VCFParseError>> + 'a>>,
-}
-
-impl<'a> Default for Variants<'a> {
-    fn default() -> Variants<'a> {
-        Variants {
-            samples: None,
-            vars_iter: None,
-        }
-    }
+    pub samples: Vec<String>,
+    pub vars_iter: Box<dyn Iterator<Item = Result<Variant, VCFParseError>> + 'a>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -45,8 +33,7 @@ fn parse_variant_line(line: String) -> Result<Variant, VCFParseError> {
 }
 
 pub fn parse_vcf<'a, T: Read + 'a>(mut file: BufReader<T>) -> Result<Variants<'a>, VCFParseError> {
-    let mut vars = Variants::default();
-
+    let samples;
     loop {
         let mut line = String::new();
         match file.read_line(&mut line) {
@@ -56,8 +43,7 @@ pub fn parse_vcf<'a, T: Read + 'a>(mut file: BufReader<T>) -> Result<Variants<'a
         }
         if line.starts_with("##") {
         } else if line.starts_with("#CHROM") {
-            let samples = read_sample_line(&line)?;
-            vars.samples = Some(samples);
+            samples = read_sample_line(&line)?;
             break;
         } else {
             return Err(VCFParseError::InvalidSampleLine(line));
@@ -71,7 +57,10 @@ pub fn parse_vcf<'a, T: Read + 'a>(mut file: BufReader<T>) -> Result<Variants<'a
         };
         parse_variant_line(line)
     });
-    vars.vars_iter = Some(Box::new(vars_iter));
+    let vars = Variants {
+        samples: samples,
+        vars_iter: Box::new(vars_iter),
+    };
 
     return Ok(vars);
 }
@@ -110,11 +99,7 @@ mod tests {
     fn it_works() {
         let mock_file = BufReader::new(VCF_45.as_bytes());
         let vars = parse_vcf(mock_file).expect("Error");
-        let vars_iter = match vars.vars_iter {
-            Some(iter) => iter,
-            None => panic!("Vars iter is None"),
-        };
-        for var_res in vars_iter {
+        for var_res in vars.vars_iter {
             let var = var_res.expect("Error reading variant");
             println!("{:?}", var);
         }
