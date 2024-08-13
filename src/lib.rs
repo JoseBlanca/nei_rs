@@ -1,11 +1,14 @@
 use std::io::{BufRead, BufReader, Read};
 
 #[derive(Debug)]
-pub struct Variant {}
+pub struct Variant {
+    ploidy: u8,
+}
 
 pub struct Variants<'a> {
     pub samples: Vec<String>,
     pub vars_iter: Box<dyn Iterator<Item = Result<Variant, VCFParseError>> + 'a>,
+    pub ploidy: u8,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -16,6 +19,8 @@ pub enum VCFParseError {
     ReadLineError(u64),
     #[error("The file is empty")]
     EmptyFile,
+    #[error("No variants found in the file")]
+    NoVariantsError,
 }
 
 fn read_sample_line(line: &str) -> Result<Vec<String>, VCFParseError> {
@@ -29,7 +34,7 @@ fn read_sample_line(line: &str) -> Result<Vec<String>, VCFParseError> {
 
 fn parse_variant_line(line: String) -> Result<Variant, VCFParseError> {
     println!("Parsing line: {}", line);
-    Ok(Variant {})
+    Ok(Variant { ploidy: 2 })
 }
 
 pub fn parse_vcf<'a, T: Read + 'a>(mut file: BufReader<T>) -> Result<Variants<'a>, VCFParseError> {
@@ -50,16 +55,29 @@ pub fn parse_vcf<'a, T: Read + 'a>(mut file: BufReader<T>) -> Result<Variants<'a
         }
     }
 
-    let vars_iter = file.lines().map(|line_res| {
-        let line = match line_res {
-            Ok(line) => line,
-            Err(_) => return Err(VCFParseError::ReadLineError(0)),
-        };
-        parse_variant_line(line)
-    });
+    let mut vars_iter = file
+        .lines()
+        .map(|line_res| {
+            let line = match line_res {
+                Ok(line) => line,
+                Err(_) => return Err(VCFParseError::ReadLineError(0)),
+            };
+            parse_variant_line(line)
+        })
+        .peekable();
+
+    let first_var = match vars_iter.peek() {
+        Some(Ok(var)) => Variant { ploidy: var.ploidy },
+        Some(Err(e)) => return Err(VCFParseError::NoVariantsError),
+        None => return Err(VCFParseError::EmptyFile),
+    };
+
+    println!("{:?}", first_var);
+
     let vars = Variants {
         samples: samples,
         vars_iter: Box::new(vars_iter),
+        ploidy: first_var.ploidy,
     };
 
     return Ok(vars);
