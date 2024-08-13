@@ -67,7 +67,7 @@ pub fn parse_vcf<'a, T: Read + 'a>(mut file: BufReader<T>) -> Result<Variants<'a
         .peekable();
 
     let first_var = match vars_iter.peek() {
-        Some(Ok(var)) => Variant { ploidy: var.ploidy },
+        Some(Ok(var)) => Variant { ..*var },
         Some(Err(e)) => return Err(VCFParseError::NoVariantsError),
         None => return Err(VCFParseError::EmptyFile),
     };
