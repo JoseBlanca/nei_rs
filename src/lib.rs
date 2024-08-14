@@ -156,7 +156,6 @@ fn parse_variant_line(
     gt_format_cache: &mut GtFormatCache,
 ) -> Result<Variant, VCFParseError> {
     let fields = line.split("\t").collect::<Vec<&str>>();
-    println!("{:?}", fields);
 
     let pos = match fields[1].parse::<u64>() {
         Ok(pos) => pos,
@@ -324,8 +323,7 @@ mod tests {
         let mock_file = BufReader::new(VCF_45.as_bytes());
         let vars = parse_vcf(mock_file).expect("Error");
         for var_res in vars.vars_iter {
-            let var = var_res.expect("Error reading variant");
-            println!("{:?}", var);
+            let _var = var_res.expect("Error reading variant");
         }
     }
 }
