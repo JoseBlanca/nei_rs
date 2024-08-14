@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read};
 
-const UNPHASED_CHAR: &str = "/";
-const PHASED_CHAR: &str = "|";
+const UNPHASED_CHAR: char = '/';
+const PHASED_CHAR: char = '|';
+const GT_FIELD_ID: &str = "GT";
+const UNPHASED_GT_SEP_ORDER: [char; 2] = [UNPHASED_CHAR, PHASED_CHAR];
+const MISSING_ALLELE: i16 = -1;
 
 #[derive(thiserror::Error, Debug)]
 pub enum VCFParseError {
@@ -24,6 +27,12 @@ pub enum VCFParseError {
     GenotypeNotFoundInFormatDefinition(String),
     #[error("GT format definition and GT do not match in line: `{0}`")]
     GtOutsideBounds(String),
+    #[error("Incorrect allele `{0}` in line: `{1}`")]
+    IncorrectAllele(String, String),
+    #[error("Different ploidies found in line: `{0}`")]
+    DifferentPloidiesError(String),
+    #[error("Error parsing GTs in line: `{0}`")]
+    GtParseError(String),
 }
 
 #[derive(Debug)]
@@ -34,18 +43,91 @@ pub struct Variant {
     alleles: Vec<String>,
     qual: f64,
     filters: Vec<String>,
+    gts: Vec<Vec<i16>>,
     ploidy: u8,
 }
 
 struct GtFormatCache {
     gt_string: String,
     gt_format_idxs: HashMap<String, usize>,
+    gt_field_idx: usize,
+    phasing_char_order: [char; 2],
 }
 
-fn parse_gts(mut gts: std::slice::Iter<&str>, gt_field_idx: usize) -> Result<(), VCFParseError> {
+fn parse_gt<'a>(
+    gt: &'a str,
+    gt_format_cache: &mut GtFormatCache,
+    line: &String,
+) -> Result<Vec<i16>, VCFParseError> {
+    if gt == "0/0" {
+        return Ok(vec![0; 2]);
+    }
+    if gt == "1/1" {
+        return Ok(vec![1; 2]);
+    }
+    if gt == "./." {
+        return Ok(vec![MISSING_ALLELE; 2]);
+    }
+
+    let phasing_char_order = gt_format_cache.phasing_char_order;
+
+    let mut alleles: Vec<&str> = gt.split(phasing_char_order[0]).collect();
+
+    if alleles.len() == 1 {
+        alleles = gt.split(phasing_char_order[1]).collect();
+        if alleles.len() > 1 {
+            gt_format_cache.phasing_char_order = [phasing_char_order[1], phasing_char_order[0]];
+        }
+    }
+
+    let alleles: Vec<Result<i16, VCFParseError>> = alleles
+        .iter()
+        .map(|allele| {
+            if allele == &"0" {
+                Ok(0)
+            } else if allele == &"1" {
+                Ok(1)
+            } else if allele == &"2" {
+                Ok(2)
+            } else if allele == &"." {
+                Ok(MISSING_ALLELE)
+            } else if allele == &"3" {
+                Ok(3)
+            } else if allele == &"4" {
+                Ok(4)
+            } else {
+                match allele.parse::<i16>() {
+                    Ok(number) => Ok(number),
+                    Err(_) => {
+                        return Err(VCFParseError::IncorrectAllele(
+                            allele.to_string(),
+                            line.to_string(),
+                        ))
+                    }
+                }
+            }
+        })
+        .collect();
+    let alleles = alleles
+        .iter()
+        .map(|allele| match allele {
+            Ok(number) => *number,
+            Err(_) => panic!(""),
+        })
+        .collect();
+    return Ok(alleles);
+}
+
+fn parse_gts(
+    gts: std::slice::Iter<&str>,
+    gt_format_cache: &mut GtFormatCache,
+    line: &String,
+) -> Result<Vec<Vec<i16>>, VCFParseError> {
+    let mut parsed_gts: Vec<Vec<i16>> = Vec::new();
+    let mut ploidy = 0;
     for gt_str in gts {
         let gt_items = gt_str.split(":").collect::<Vec<&str>>();
-        let gt = match gt_items.get(gt_field_idx) {
+        let gt = match gt_items.get(gt_format_cache.gt_field_idx) {
             Some(gt_field) => gt_field,
             None => {
                 return Err(VCFParseError::NoGenotypeFormatDefinition(
@@ -53,9 +135,20 @@ fn parse_gts(mut gts: std::slice::Iter<&str>, gt_field_idx: usize) -> Result<(),
                 ))
             }
         };
-        println!("{:?}", gt);
+        let alleles = match parse_gt(gt, gt_format_cache, line) {
+            Ok(alleles) => alleles,
+            Err(e) => return Err(e),
+        };
+
+        let this_ploidy = alleles.len();
+        if ploidy == 0 {
+            ploidy = this_ploidy as u8;
+        } else if ploidy != this_ploidy as u8 {
+            return Err(VCFParseError::DifferentPloidiesError(line.to_string()));
+        }
+        parsed_gts.push(alleles);
     }
-    Ok(())
+    Ok(parsed_gts)
 }
 
 fn parse_variant_line(
@@ -98,13 +191,15 @@ fn parse_variant_line(
         let gt_format_idxs = HashMap::<String, usize>::from_iter(iter);
         gt_format_cache.gt_string = gt_format_str;
         gt_format_cache.gt_format_idxs = gt_format_idxs;
+        gt_format_cache.gt_field_idx = match gt_format_cache.gt_format_idxs.get(GT_FIELD_ID) {
+            Some(idx) => *idx,
+            None => return Err(VCFParseError::GenotypeNotFoundInFormatDefinition(line)),
+        };
     }
 
-    let gt_field_idx = match gt_format_cache.gt_format_idxs.get("GT") {
-        Some(idx) => idx,
-        None => return Err(VCFParseError::GenotypeNotFoundInFormatDefinition(line)),
-    };
-    let gts = parse_gts(fields[9..].iter(), *gt_field_idx);
+    let gts = parse_gts(fields[9..].iter(), gt_format_cache, &line)?;
+
+    let ploidy = gts[0].len() as u8;
 
     let var = Variant {
         chrom: fields[0].to_string(),
@@ -113,7 +208,8 @@ fn parse_variant_line(
         alleles,
         qual,
         filters,
-        ploidy: 2,
+        gts,
+        ploidy: ploidy,
     };
     Ok(var)
 }
@@ -154,6 +250,8 @@ pub fn parse_vcf<'a, T: Read + 'a>(mut file: BufReader<T>) -> Result<Variants<'a
     let mut gt_format_cache = GtFormatCache {
         gt_string: "".to_string(),
         gt_format_idxs: HashMap::new(),
+        gt_field_idx: 0,
+        phasing_char_order: UNPHASED_GT_SEP_ORDER,
     };
     let mut vars_iter = file
         .lines()
@@ -174,9 +272,10 @@ pub fn parse_vcf<'a, T: Read + 'a>(mut file: BufReader<T>) -> Result<Variants<'a
             alleles: var.alleles.clone(),
             qual: var.qual,
             filters: var.filters.clone(),
+            gts: var.gts.clone(),
             ploidy: var.ploidy,
         },
-        Some(Err(e)) => return Err(VCFParseError::NoVariantsError),
+        Some(Err(_)) => return Err(VCFParseError::NoVariantsError),
         None => return Err(VCFParseError::EmptyFile),
     };
 
