@@ -55,6 +55,7 @@ struct GtFormatCache {
     gt_string: String,
     gt_format_idxs: HashMap<String, usize>,
     gt_field_idx: usize,
+    num_samples: usize,
 }
 
 fn parse_gt<'a>(gt: &'a str, line: &String) -> Result<Vec<i16>, VCFParseError> {
@@ -94,7 +95,9 @@ fn parse_gts(
     gt_format_cache: &mut GtFormatCache,
     line: &String,
 ) -> Result<Vec<Vec<i16>>, VCFParseError> {
-    let mut parsed_gts: Vec<Vec<i16>> = Vec::new();
+    let mut parsed_gts: Vec<Vec<i16>>;
+    parsed_gts = Vec::with_capacity(gt_format_cache.num_samples);
+
     let mut ploidy = 0;
     for gt_str in gts {
         let gt_items = gt_str.split(":").collect::<Vec<&str>>();
@@ -223,6 +226,7 @@ fn parse_vcf_buffer<'a, T: Read + 'a>(
         gt_string: "".to_string(),
         gt_format_idxs: HashMap::new(),
         gt_field_idx: 0,
+        num_samples: samples.len(),
     };
     let mut vars_iter = file
         .lines()
