@@ -78,7 +78,7 @@ fn parse_gt<'a>(gt: &'a str, line: &String) -> Result<Vec<i16>, VCFParseError> {
             // '/'
             gts.push(allele);
             allele = 0;
-        } else if chr == 48 {
+        } else if chr == 124 {
             // '\'
             gts.push(allele);
             allele = 0;
