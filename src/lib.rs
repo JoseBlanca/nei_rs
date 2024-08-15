@@ -57,47 +57,27 @@ struct GtFormatCache {
     gt_field_idx: usize,
 }
 
-// TODO, take a look at this: https://rust-malaysia.github.io/code/2020/07/11/faster-integer-parsing.html
 fn parse_gt<'a>(gt: &'a str, line: &String) -> Result<Vec<i16>, VCFParseError> {
     if gt == "0/0" {
         return Ok(vec![0; 2]);
     } else if gt == "1/1" {
         return Ok(vec![1; 2]);
-    } else if gt == "./." {
-        return Ok(vec![MISSING_ALLELE; 2]);
     }
 
     let mut gts: Vec<i16> = Vec::new();
     let mut allele = 0;
     for chr in gt.bytes() {
         allele *= 10;
-        if chr == 48 {
-        } else if chr == 49 {
-            allele += 1;
-        } else if chr == 47 {
-            // '/'
+        let digit = chr & 0b0000_1111;
+        if digit < 10 {
+            allele += digit as i16;
+        } else if digit == 12 || digit == 15 {
+            // chr is / or |
             gts.push(allele);
             allele = 0;
-        } else if chr == 124 {
-            // '\'
-            gts.push(allele);
-            allele = 0;
-        } else if chr == 50 {
-            allele += 2;
-        } else if chr == 51 {
-            allele += 3;
-        } else if chr == 52 {
-            allele += 4;
-        } else if chr == 53 {
-            allele += 5;
-        } else if chr == 54 {
-            allele += 6;
-        } else if chr == 55 {
-            allele += 7;
-        } else if chr == 56 {
-            allele += 8;
-        } else if chr == 57 {
-            allele += 9;
+        } else if digit == 14 && allele == 0 {
+            // chr is .
+            gts.push(MISSING_ALLELE);
         } else {
             return Err(VCFParseError::IncorrectAllele(
                 chr.to_string(),
@@ -381,5 +361,15 @@ mod tests {
     }
 
     #[test]
-    fn gt_conversion() {}
+    fn gt_conversion() {
+        let chr = "2".to_string().bytes().next().unwrap();
+        let chr = "|".to_string().bytes().next().unwrap();
+        let chr = "/".to_string().bytes().next().unwrap();
+        let chr = ".".to_string().bytes().next().unwrap();
+
+        let mask = 0b0000_1111;
+        let digit = chr & mask;
+        println!("{:b}", chr);
+        println!("{}", digit);
+    }
 }
