@@ -61,21 +61,6 @@ struct GtFormatCache {
     phasing_char_order: [char; 2],
 }
 
-fn parse_allele(allele: &str, line: &str) -> Result<i16, VCFParseError> {
-    if allele == "." {
-        return Ok(MISSING_ALLELE);
-    }
-    match allele.parse::<i16>() {
-        Ok(number) => Ok(number),
-        Err(_) => {
-            return Err(VCFParseError::IncorrectAllele(
-                allele.to_string(),
-                line.to_string(),
-            ))
-        }
-    }
-}
-
 // TODO, take a look at this: https://rust-malaysia.github.io/code/2020/07/11/faster-integer-parsing.html
 fn parse_gt<'a>(gt: &'a str, line: &String) -> Result<Vec<i16>, VCFParseError> {
     if gt == "0/0" {
@@ -399,4 +384,7 @@ mod tests {
             let _var = var_res.expect("Error reading variant");
         }
     }
+
+    #[test]
+    fn gt_conversion() {}
 }
