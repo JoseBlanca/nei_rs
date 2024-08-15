@@ -61,68 +61,71 @@ struct GtFormatCache {
     phasing_char_order: [char; 2],
 }
 
-fn parse_gt<'a>(
-    gt: &'a str,
-    gt_format_cache: &mut GtFormatCache,
-    line: &String,
-) -> Result<Vec<i16>, VCFParseError> {
+fn parse_allele(allele: &str, line: &str) -> Result<i16, VCFParseError> {
+    if allele == "." {
+        return Ok(MISSING_ALLELE);
+    }
+    match allele.parse::<i16>() {
+        Ok(number) => Ok(number),
+        Err(_) => {
+            return Err(VCFParseError::IncorrectAllele(
+                allele.to_string(),
+                line.to_string(),
+            ))
+        }
+    }
+}
+
+// TODO, take a look at this: https://rust-malaysia.github.io/code/2020/07/11/faster-integer-parsing.html
+fn parse_gt<'a>(gt: &'a str, line: &String) -> Result<Vec<i16>, VCFParseError> {
     if gt == "0/0" {
         return Ok(vec![0; 2]);
-    }
-    if gt == "1/1" {
+    } else if gt == "1/1" {
         return Ok(vec![1; 2]);
-    }
-    if gt == "./." {
+    } else if gt == "./." {
         return Ok(vec![MISSING_ALLELE; 2]);
     }
 
-    let phasing_char_order = gt_format_cache.phasing_char_order;
-
-    let mut alleles: Vec<&str> = gt.split(phasing_char_order[0]).collect();
-
-    if alleles.len() == 1 {
-        alleles = gt.split(phasing_char_order[1]).collect();
-        if alleles.len() > 1 {
-            gt_format_cache.phasing_char_order = [phasing_char_order[1], phasing_char_order[0]];
+    let mut gts: Vec<i16> = Vec::new();
+    let mut allele = 0;
+    for chr in gt.bytes() {
+        allele *= 10;
+        if chr == 48 {
+        } else if chr == 49 {
+            allele += 1;
+        } else if chr == 47 {
+            // '/'
+            gts.push(allele);
+            allele = 0;
+        } else if chr == 48 {
+            // '\'
+            gts.push(allele);
+            allele = 0;
+        } else if chr == 50 {
+            allele += 2;
+        } else if chr == 51 {
+            allele += 3;
+        } else if chr == 52 {
+            allele += 4;
+        } else if chr == 53 {
+            allele += 5;
+        } else if chr == 54 {
+            allele += 6;
+        } else if chr == 55 {
+            allele += 7;
+        } else if chr == 56 {
+            allele += 8;
+        } else if chr == 57 {
+            allele += 9;
+        } else {
+            return Err(VCFParseError::IncorrectAllele(
+                chr.to_string(),
+                line.to_string(),
+            ));
         }
     }
-
-    let alleles: Vec<Result<i16, VCFParseError>> = alleles
-        .iter()
-        .map(|allele| {
-            if allele == &"0" {
-                Ok(0)
-            } else if allele == &"1" {
-                Ok(1)
-            } else if allele == &"2" {
-                Ok(2)
-            } else if allele == &"." {
-                Ok(MISSING_ALLELE)
-            } else if allele == &"3" {
-                Ok(3)
-            } else if allele == &"4" {
-                Ok(4)
-            } else {
-                match allele.parse::<i16>() {
-                    Ok(number) => Ok(number),
-                    Err(_) => {
-                        return Err(VCFParseError::IncorrectAllele(
-                            allele.to_string(),
-                            line.to_string(),
-                        ))
-                    }
-                }
-            }
-        })
-        .collect();
-    let alleles = alleles
-        .iter()
-        .map(|allele| match allele {
-            Ok(number) => *number,
-            Err(_) => panic!(""),
-        })
-        .collect();
-    return Ok(alleles);
+    gts.push(allele);
+    return Ok(gts);
 }
 
 fn parse_gts(
@@ -142,7 +145,7 @@ fn parse_gts(
                 ))
             }
         };
-        let alleles = match parse_gt(gt, gt_format_cache, line) {
+        let alleles = match parse_gt(gt, line) {
             Ok(alleles) => alleles,
             Err(e) => return Err(e),
         };

@@ -7,7 +7,7 @@ fn main() {
     test_vcf.push(path);
     match read_vcf_file(&test_vcf) {
         Ok(variants) => {
-            for var in variants.vars_iter {
+            for _var in variants.vars_iter {
                 //println!("{:?}", var);
             }
         }
