@@ -1,0 +1,1 @@
+Variants should not have a Variant iterator, but something capable of generating iterators

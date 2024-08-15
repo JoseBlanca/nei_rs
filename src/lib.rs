@@ -1,8 +1,6 @@
 use flate2::read::MultiGzDecoder;
 use std::collections::HashMap;
-use std::fmt::Error;
 use std::fs::File;
-use std::io;
 use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
 
@@ -38,6 +36,10 @@ pub enum VCFParseError {
     DifferentPloidiesError(String),
     #[error("Error parsing GTs in line: `{0}`")]
     GtParseError(String),
+    #[error("File is not gzip and does not start with ##: `{0}`")]
+    InvalidVCFFile(String),
+    #[error("File is gzip, but does not start with ##: `{0}`")]
+    InvalidGzipVCFFile(String),
 }
 
 #[derive(Debug)]
@@ -233,7 +235,9 @@ fn read_sample_line(line: &str) -> Result<Vec<String>, VCFParseError> {
     Ok(samples)
 }
 
-pub fn parse_vcf<'a, T: Read + 'a>(mut file: BufReader<T>) -> Result<Variants<'a>, VCFParseError> {
+fn parse_vcf_buffer<'a, T: Read + 'a>(
+    mut file: BufReader<T>,
+) -> Result<Variants<'a>, VCFParseError> {
     let samples;
     loop {
         let mut line = String::new();
@@ -298,10 +302,10 @@ pub enum VcfFileKind {
     GzippedVcf,
 }
 
-pub fn guess_vcf_file_kind(fpath: &PathBuf) -> Result<VcfFileKind, io::Error> {
+pub fn guess_vcf_file_kind(fpath: &PathBuf) -> Result<VcfFileKind, Box<dyn std::error::Error>> {
     let mut file = match File::open(fpath.clone()) {
         Ok(file) => file,
-        Err(e) => return Err(e),
+        Err(e) => return Err(Box::new(e)),
     };
     let mut buffer = vec![0; 2];
     file.read_exact(&mut buffer)?;
@@ -310,22 +314,47 @@ pub fn guess_vcf_file_kind(fpath: &PathBuf) -> Result<VcfFileKind, io::Error> {
         return Ok(VcfFileKind::PlainTextVcf);
     }
     if buffer != [0x1f, 0x8b] {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Does not start with ## and not a valid gzip file",
-        ));
+        return Err(Box::new(VCFParseError::InvalidVCFFile(
+            fpath.to_string_lossy().to_string(),
+        )));
     }
 
-    let mut file = File::open(fpath)?;
+    let file = File::open(fpath)?;
     let mut file = MultiGzDecoder::new(file);
     file.read_exact(&mut buffer)?;
     if buffer == [0x23, 0x23] {
         return Ok(VcfFileKind::GzippedVcf);
     }
-    Err(io::Error::new(
-        io::ErrorKind::InvalidData,
-        "The given gzip file does not start with ##",
-    ))
+    Err(Box::new(VCFParseError::InvalidGzipVCFFile(
+        fpath.to_string_lossy().to_string(),
+    )))
+}
+
+pub fn read_vcf_file(fpath: &PathBuf) -> Result<Variants, Box<dyn std::error::Error>> {
+    let kind = match guess_vcf_file_kind(fpath) {
+        Ok(kind) => kind,
+        Err(e) => return Err(e),
+    };
+
+    let file = File::open(fpath)?;
+
+    if kind == VcfFileKind::PlainTextVcf {
+        let file = BufReader::new(file);
+        match parse_vcf_buffer(file) {
+            Ok(vars) => return Ok(vars),
+            Err(e) => return Err(Box::new(e)),
+        }
+    } else if kind == VcfFileKind::GzippedVcf {
+        let file = MultiGzDecoder::new(file);
+        let file = BufReader::new(file);
+        match parse_vcf_buffer(file) {
+            Ok(vars) => return Ok(vars),
+            Err(e) => return Err(Box::new(e)),
+        }
+    }
+    Err(Box::new(VCFParseError::InvalidVCFFile(
+        fpath.to_string_lossy().to_string(),
+    )))
 }
 
 #[cfg(test)]
@@ -362,7 +391,7 @@ mod tests {
     #[test]
     fn it_works() {
         let mock_file = BufReader::new(VCF_45.as_bytes());
-        let vars = parse_vcf(mock_file).expect("Error");
+        let vars = parse_vcf_buffer(mock_file).expect("Error");
         for var_res in vars.vars_iter {
             let _var = var_res.expect("Error reading variant");
         }
