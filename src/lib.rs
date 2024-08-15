@@ -1,5 +1,10 @@
+use flate2::read::MultiGzDecoder;
 use std::collections::HashMap;
+use std::fmt::Error;
+use std::fs::File;
+use std::io;
 use std::io::{BufRead, BufReader, Read};
+use std::path::PathBuf;
 
 const UNPHASED_CHAR: char = '/';
 const PHASED_CHAR: char = '|';
@@ -285,6 +290,42 @@ pub fn parse_vcf<'a, T: Read + 'a>(mut file: BufReader<T>) -> Result<Variants<'a
     };
 
     return Ok(vars);
+}
+
+#[derive(PartialEq)]
+pub enum VcfFileKind {
+    PlainTextVcf,
+    GzippedVcf,
+}
+
+pub fn guess_vcf_file_kind(fpath: &PathBuf) -> Result<VcfFileKind, io::Error> {
+    let mut file = match File::open(fpath.clone()) {
+        Ok(file) => file,
+        Err(e) => return Err(e),
+    };
+    let mut buffer = vec![0; 2];
+    file.read_exact(&mut buffer)?;
+
+    if buffer == [0x23, 0x23] {
+        return Ok(VcfFileKind::PlainTextVcf);
+    }
+    if buffer != [0x1f, 0x8b] {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Does not start with ## and not a valid gzip file",
+        ));
+    }
+
+    let mut file = File::open(fpath)?;
+    let mut file = MultiGzDecoder::new(file);
+    file.read_exact(&mut buffer)?;
+    if buffer == [0x23, 0x23] {
+        return Ok(VcfFileKind::GzippedVcf);
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "The given gzip file does not start with ##",
+    ))
 }
 
 #[cfg(test)]
