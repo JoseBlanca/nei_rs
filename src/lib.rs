@@ -4,10 +4,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
 
-const UNPHASED_CHAR: char = '/';
-const PHASED_CHAR: char = '|';
 const GT_FIELD_ID: &str = "GT";
-const UNPHASED_GT_SEP_ORDER: [char; 2] = [UNPHASED_CHAR, PHASED_CHAR];
 const MISSING_ALLELE: i16 = -1;
 
 #[derive(thiserror::Error, Debug)]
@@ -58,7 +55,6 @@ struct GtFormatCache {
     gt_string: String,
     gt_format_idxs: HashMap<String, usize>,
     gt_field_idx: usize,
-    phasing_char_order: [char; 2],
 }
 
 // TODO, take a look at this: https://rust-malaysia.github.io/code/2020/07/11/faster-integer-parsing.html
@@ -247,7 +243,6 @@ fn parse_vcf_buffer<'a, T: Read + 'a>(
         gt_string: "".to_string(),
         gt_format_idxs: HashMap::new(),
         gt_field_idx: 0,
-        phasing_char_order: UNPHASED_GT_SEP_ORDER,
     };
     let mut vars_iter = file
         .lines()
