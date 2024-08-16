@@ -63,23 +63,31 @@ struct GtFormatCache {
 
 fn get_ploidy_form_first_gt(
     gt: &str,
-    line: &String,
     gt_format_cache: &mut GtFormatCache,
 ) -> Result<u8, VCFParseError> {
     let gt = get_gt_item_from_gt_string(gt, gt_format_cache)?;
-    let gt = parse_gt(gt, line)?;
-    Ok(gt.len() as u8)
+    let alleles: Vec<&str> = gt.split(|c| c == '/' || c == '|').collect();
+    let ploidy = alleles.len();
+    Ok(ploidy as u8)
 }
 
-fn parse_gt<'a>(gt: &'a str, line: &String) -> Result<Vec<i16>, VCFParseError> {
+fn parse_gt<'a>(
+    gt: &'a str,
+    sample_idx: usize,
+    parsed_gts: &mut Vec<Vec<i16>>,
+    line: &String,
+) -> Result<u8, VCFParseError> {
     if gt == "0/0" {
-        return Ok(vec![0; 2]);
+        return Ok(2);
     } else if gt == "1/1" {
-        return Ok(vec![1; 2]);
+        parsed_gts[sample_idx][0] = 1;
+        parsed_gts[sample_idx][1] = 1;
+        return Ok(2);
     }
 
-    let mut gts: Vec<i16> = Vec::new();
     let mut allele = 0;
+    let mut ploidy_idx = 0;
+    let mut allele_was_missing = false;
     for chr in gt.bytes() {
         allele *= 10;
         let digit = chr & 0b0000_1111;
@@ -87,11 +95,15 @@ fn parse_gt<'a>(gt: &'a str, line: &String) -> Result<Vec<i16>, VCFParseError> {
             allele += digit as i16;
         } else if digit == 12 || digit == 15 {
             // chr is / or |
-            gts.push(allele);
+            parsed_gts[sample_idx][ploidy_idx] = allele;
             allele = 0;
+            ploidy_idx += 1;
+            allele_was_missing = false;
         } else if digit == 14 && allele == 0 {
             // chr is .
-            gts.push(MISSING_ALLELE);
+            parsed_gts[sample_idx][ploidy_idx] = MISSING_ALLELE;
+            allele_was_missing = true;
+            ploidy_idx += 1;
         } else {
             return Err(VCFParseError::IncorrectAllele(
                 chr.to_string(),
@@ -99,8 +111,10 @@ fn parse_gt<'a>(gt: &'a str, line: &String) -> Result<Vec<i16>, VCFParseError> {
             ));
         }
     }
-    gts.push(allele);
-    return Ok(gts);
+    if !allele_was_missing {
+        parsed_gts[sample_idx][ploidy_idx] = allele
+    };
+    Ok((ploidy_idx + 1) as u8)
 }
 
 fn get_gt_item_from_gt_string<'a>(
@@ -123,22 +137,22 @@ fn parse_gts(
     gt_format_cache: &mut GtFormatCache,
     line: &String,
 ) -> Result<Vec<Vec<i16>>, VCFParseError> {
-    let mut parsed_gts: Vec<Vec<i16>>;
-    parsed_gts = Vec::with_capacity(gt_format_cache.num_samples);
+    let mut parsed_gts =
+        vec![vec![0; gt_format_cache.ploidy as usize]; gt_format_cache.num_samples];
 
-    let mut ploidy = 0;
+    let mut sample_idx = 0;
     for gt_str in gts {
         let gt = get_gt_item_from_gt_string(gt_str, gt_format_cache)?;
-        let alleles = match parse_gt(gt, line) {
+
+        let this_ploidy = match parse_gt(gt, sample_idx, &mut parsed_gts, line) {
             Ok(alleles) => alleles,
             Err(e) => return Err(e),
         };
 
-        let this_ploidy = alleles.len();
         if gt_format_cache.ploidy != this_ploidy as u8 {
             return Err(VCFParseError::DifferentPloidiesError(line.to_string()));
         }
-        parsed_gts.push(alleles);
+        sample_idx += 1;
     }
     Ok(parsed_gts)
 }
@@ -189,8 +203,7 @@ fn parse_variant_line(
     }
 
     if gt_format_cache.ploidy == 0 {
-        gt_format_cache.ploidy = match get_ploidy_form_first_gt(&fields[9], &line, gt_format_cache)
-        {
+        gt_format_cache.ploidy = match get_ploidy_form_first_gt(&fields[9], gt_format_cache) {
             Ok(ploidy) => ploidy,
             Err(_) => {
                 return Err(VCFParseError::FirstGtDoesNotDefinePloidy(
