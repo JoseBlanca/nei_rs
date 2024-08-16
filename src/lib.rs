@@ -134,21 +134,6 @@ fn get_gt_item_from_gt_string<'a>(
     ))
 }
 
-fn get_gt_item_from_gt_string_old<'a>(
-    gt_str: &'a str,
-    gt_format_cache: &mut GtFormatCache,
-) -> Result<&'a str, VCFParseError> {
-    let gt_items = gt_str.split(":").collect::<Vec<&str>>();
-    match gt_items.get(gt_format_cache.gt_field_idx) {
-        Some(gt_field) => Ok(gt_field),
-        None => {
-            return Err(VCFParseError::NoGenotypeFormatDefinition(
-                gt_str.to_string(),
-            ))
-        }
-    }
-}
-
 fn parse_gts(
     gts: std::slice::Iter<&str>,
     gt_format_cache: &mut GtFormatCache,
