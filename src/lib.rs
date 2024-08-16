@@ -121,6 +121,23 @@ fn get_gt_item_from_gt_string<'a>(
     gt_str: &'a str,
     gt_format_cache: &mut GtFormatCache,
 ) -> Result<&'a str, VCFParseError> {
+    let desired_field_idx = gt_format_cache.gt_field_idx;
+    let mut idx = 0 as usize;
+    for gt_item in gt_str.split(":") {
+        if idx == desired_field_idx {
+            return Ok(gt_item);
+        }
+        idx += 1;
+    }
+    Err(VCFParseError::NoGenotypeFormatDefinition(
+        gt_str.to_string(),
+    ))
+}
+
+fn get_gt_item_from_gt_string_old<'a>(
+    gt_str: &'a str,
+    gt_format_cache: &mut GtFormatCache,
+) -> Result<&'a str, VCFParseError> {
     let gt_items = gt_str.split(":").collect::<Vec<&str>>();
     match gt_items.get(gt_format_cache.gt_field_idx) {
         Some(gt_field) => Ok(gt_field),
