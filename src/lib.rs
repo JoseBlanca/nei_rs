@@ -37,6 +37,8 @@ pub enum VCFParseError {
     InvalidVCFFile(String),
     #[error("File is gzip, but does not start with ##: `{0}`")]
     InvalidGzipVCFFile(String),
+    #[error("First GT `{0}` does not define ploidy in first variant line: `{1}`")]
+    FirstGtDoesNotDefinePloidy(String, String),
 }
 
 #[derive(Debug)]
@@ -56,6 +58,17 @@ struct GtFormatCache {
     gt_format_idxs: HashMap<String, usize>,
     gt_field_idx: usize,
     num_samples: usize,
+    ploidy: u8,
+}
+
+fn get_ploidy_form_first_gt(
+    gt: &str,
+    line: &String,
+    gt_format_cache: &mut GtFormatCache,
+) -> Result<u8, VCFParseError> {
+    let gt = get_gt_item_from_gt_string(gt, gt_format_cache)?;
+    let gt = parse_gt(gt, line)?;
+    Ok(gt.len() as u8)
 }
 
 fn parse_gt<'a>(gt: &'a str, line: &String) -> Result<Vec<i16>, VCFParseError> {
@@ -90,6 +103,21 @@ fn parse_gt<'a>(gt: &'a str, line: &String) -> Result<Vec<i16>, VCFParseError> {
     return Ok(gts);
 }
 
+fn get_gt_item_from_gt_string<'a>(
+    gt_str: &'a str,
+    gt_format_cache: &mut GtFormatCache,
+) -> Result<&'a str, VCFParseError> {
+    let gt_items = gt_str.split(":").collect::<Vec<&str>>();
+    match gt_items.get(gt_format_cache.gt_field_idx) {
+        Some(gt_field) => Ok(gt_field),
+        None => {
+            return Err(VCFParseError::NoGenotypeFormatDefinition(
+                gt_str.to_string(),
+            ))
+        }
+    }
+}
+
 fn parse_gts(
     gts: std::slice::Iter<&str>,
     gt_format_cache: &mut GtFormatCache,
@@ -100,6 +128,7 @@ fn parse_gts(
 
     let mut ploidy = 0;
     for gt_str in gts {
+        /*
         let gt_items = gt_str.split(":").collect::<Vec<&str>>();
         let gt = match gt_items.get(gt_format_cache.gt_field_idx) {
             Some(gt_field) => gt_field,
@@ -109,15 +138,15 @@ fn parse_gts(
                 ))
             }
         };
+         */
+        let gt = get_gt_item_from_gt_string(gt_str, gt_format_cache)?;
         let alleles = match parse_gt(gt, line) {
             Ok(alleles) => alleles,
             Err(e) => return Err(e),
         };
 
         let this_ploidy = alleles.len();
-        if ploidy == 0 {
-            ploidy = this_ploidy as u8;
-        } else if ploidy != this_ploidy as u8 {
+        if gt_format_cache.ploidy != this_ploidy as u8 {
             return Err(VCFParseError::DifferentPloidiesError(line.to_string()));
         }
         parsed_gts.push(alleles);
@@ -167,6 +196,19 @@ fn parse_variant_line(
         gt_format_cache.gt_field_idx = match gt_format_cache.gt_format_idxs.get(GT_FIELD_ID) {
             Some(idx) => *idx,
             None => return Err(VCFParseError::GenotypeNotFoundInFormatDefinition(line)),
+        };
+    }
+
+    if gt_format_cache.ploidy == 0 {
+        gt_format_cache.ploidy = match get_ploidy_form_first_gt(&fields[9], &line, gt_format_cache)
+        {
+            Ok(ploidy) => ploidy,
+            Err(_) => {
+                return Err(VCFParseError::FirstGtDoesNotDefinePloidy(
+                    fields[9].to_string(),
+                    line.to_string(),
+                ))
+            }
         };
     }
 
@@ -227,7 +269,9 @@ fn parse_vcf_buffer<'a, T: Read + 'a>(
         gt_format_idxs: HashMap::new(),
         gt_field_idx: 0,
         num_samples: samples.len(),
+        ploidy: 0,
     };
+
     let mut vars_iter = file
         .lines()
         .map(move |line_res| {
@@ -362,18 +406,5 @@ mod tests {
         for var_res in vars.vars_iter {
             let _var = var_res.expect("Error reading variant");
         }
-    }
-
-    #[test]
-    fn gt_conversion() {
-        let chr = "2".to_string().bytes().next().unwrap();
-        let chr = "|".to_string().bytes().next().unwrap();
-        let chr = "/".to_string().bytes().next().unwrap();
-        let chr = ".".to_string().bytes().next().unwrap();
-
-        let mask = 0b0000_1111;
-        let digit = chr & mask;
-        println!("{:b}", chr);
-        println!("{}", digit);
     }
 }
