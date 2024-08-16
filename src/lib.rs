@@ -128,17 +128,6 @@ fn parse_gts(
 
     let mut ploidy = 0;
     for gt_str in gts {
-        /*
-        let gt_items = gt_str.split(":").collect::<Vec<&str>>();
-        let gt = match gt_items.get(gt_format_cache.gt_field_idx) {
-            Some(gt_field) => gt_field,
-            None => {
-                return Err(VCFParseError::NoGenotypeFormatDefinition(
-                    gt_str.to_string(),
-                ))
-            }
-        };
-         */
         let gt = get_gt_item_from_gt_string(gt_str, gt_format_cache)?;
         let alleles = match parse_gt(gt, line) {
             Ok(alleles) => alleles,
